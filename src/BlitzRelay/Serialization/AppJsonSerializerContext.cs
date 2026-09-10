@@ -12,4 +12,5 @@ namespace BlitzRelay.Serialization;
 [JsonSerializable(typeof(RelayHttpApi.PatchRoomRequest))]
 [JsonSerializable(typeof(IReadOnlyList<RoomSnapshot>))]
 [JsonSerializable(typeof(RoomSnapshot))]
+[JsonSerializable(typeof(PublicRoomSnapshot))]
 internal partial class AppJsonSerializerContext : JsonSerializerContext;

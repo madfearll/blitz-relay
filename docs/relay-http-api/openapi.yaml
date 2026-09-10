@@ -7,6 +7,7 @@ info:
     Most endpoints require a Bearer token matching `BLITZ_RELAY_HTTP_ADMIN_TOKEN`.
     `DELETE /rooms/{roomCode}`, `PATCH /rooms/{roomCode}`, and
     `DELETE /rooms/{roomCode}/clients/{virtualClientId}` also accept the room's host token.
+    Published rooms can be queried anonymously by exact room code.
   version: 1.0.0
 
 servers:
@@ -169,6 +170,34 @@ paths:
         '404':
           description: Room or client not found
 
+  /rooms/{roomCode}/public:
+    parameters:
+      - name: roomCode
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-HJ-NP-Z2-9]{8}$'
+        description: The exact 8-character room code
+    get:
+      summary: Query published room metadata
+      description: |
+        Returns the public snapshot for an exact room code without authentication.
+        Missing, unpublished, private, and destroyed rooms all return 404. Requests
+        are limited to 60 per minute per source IP.
+      security: [ ]
+      responses:
+        '200':
+          description: Published room found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRoomSnapshot'
+        '404':
+          description: Room unavailable or code invalid
+        '429':
+          description: Too many public lookup requests
+
 components:
   securitySchemes:
     bearerAuth:
@@ -215,18 +244,53 @@ components:
           type: string
           nullable: true
           description: New display name for the room (max 255 bytes UTF-8). Null to leave unchanged.
+        isPublic:
+          type: boolean
+          nullable: true
+          description: Publishes or unpublishes exact-code anonymous lookup. Null leaves it unchanged.
         metadataToAdd:
           type: object
           additionalProperties:
             type: string
           nullable: true
-          description: Metadata key-value pairs to add or overwrite
+          description: |
+            Metadata to add or overwrite. Allowed keys are HostName, Version, Users,
+            MaxMembers, and DisconnectedFriends. Users and MaxMembers must be integers.
         metadataToRemove:
           type: array
           items:
             type: string
           nullable: true
-          description: Metadata keys to remove
+          description: Allowed metadata keys to remove
+
+    PublicRoomSnapshot:
+      type: object
+      properties:
+        code:
+          type: string
+        kind:
+          type: integer
+          description: Room kind; 0 is ephemeral and 1 is persistent reserved
+        maximumClients:
+          type: integer
+          description: Relay network-client capacity; independent of metadata MaxMembers
+        connectedClientCount:
+          type: integer
+          description: Connected Relay network clients; independent of metadata Users
+        hasHost:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Allowlisted game metadata only
+      required:
+        - code
+        - kind
+        - maximumClients
+        - connectedClientCount
+        - hasHost
+        - metadata
 
     RoomSnapshot:
       type: object

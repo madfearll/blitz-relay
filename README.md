@@ -22,7 +22,7 @@ relay between game clients, supporting both reliable and unreliable delivery mod
 The server consists of two main components:
 
 1. **UDP Relay Server** (port 7770 by default): Handles room management and game traffic relay between connected peers.
-2. **HTTP Admin API** (port 7771 by default): Provides REST endpoints for creating, listing, and deleting rooms.
+2. **HTTP API** (port 7771 by default): Provides administrative room management and exact-code public metadata lookup.
 
 ### Room Lifecycle
 
@@ -129,6 +129,7 @@ additionally accept the room's host token.
 | POST   | `/rooms`                                      | Create a persistent room                  |
 | GET    | `/rooms`                                      | List all rooms                            |
 | GET    | `/rooms/{roomCode}`                           | Get details of a specific room            |
+| GET    | `/rooms/{roomCode}/public`                    | Query published metadata by exact code     |
 | DELETE | `/rooms/{roomCode}`                           | Delete a room                             |
 | PATCH  | `/rooms/{roomCode}`                           | Update a room's display name and metadata |
 | DELETE | `/rooms/{roomCode}/clients/{virtualClientId}` | Kick a client from a room                 |
@@ -151,14 +152,35 @@ additionally accept the room's host token.
 ```json
 {
   "displayName": "Updated Room Name",
+  "isPublic": true,
   "metadataToAdd": {
-    "mode": "ranked"
+    "HostName": "Player",
+    "Version": "1.0.0",
+    "Users": "1",
+    "MaxMembers": "8",
+    "DisconnectedFriends": ""
   },
   "metadataToRemove": [
     "oldKey"
   ]
 }
 ```
+
+`PATCH /rooms/{roomCode}` accepts either the HTTP admin token or that room's host token. Patch metadata is restricted
+to `HostName`, `Version`, `Users`, `MaxMembers`, and `DisconnectedFriends`. `Users` and `MaxMembers` are game-level
+values: `Users` can include multiple local users behind one network client, and `MaxMembers` does not change Relay
+`maximumClients`.
+
+After a host patches `isPublic` to `true`, `GET /rooms/{roomCode}/public` exposes only an allowlisted snapshot. It never
+returns host/admin tokens, connection keys, endpoints, or internal peer state. Invalid codes, private or unpublished
+rooms, destroyed ephemeral rooms, and unknown rooms all return `404`. Anonymous lookups are limited to 60 requests per
+minute per source IP and return `429` when exceeded. No anonymous room-list endpoint is provided.
+
+Ephemeral rooms are destroyed when their host disconnects. Publishing is therefore best-effort after the UDP room has
+been created, and the public endpoint can briefly return `404` before the host's first successful patch.
+
+`DisconnectedFriends` contains raw platform identifiers and is public to anyone who knows the room code. Do not use it
+for secrets or as a security boundary.
 
 **Room Response**
 

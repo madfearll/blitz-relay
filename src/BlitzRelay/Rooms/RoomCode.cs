@@ -8,6 +8,18 @@ public static class RoomCode
 
 	private const int CodeLength = 8;
 
+	public static bool IsValid(string? code)
+	{
+		if (code is not { Length: CodeLength }) return false;
+
+		foreach (char character in code)
+		{
+			if (!Alphabet.Contains(char.ToUpperInvariant(character))) return false;
+		}
+
+		return true;
+	}
+
 	public static string Generate()
 	{
 		Span<byte> random = stackalloc byte[CodeLength];

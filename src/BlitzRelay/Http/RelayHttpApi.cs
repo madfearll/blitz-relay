@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using System.Buffers;
+using System.Globalization;
+using System.Threading.RateLimiting;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -15,11 +17,41 @@ namespace BlitzRelay.Http;
 
 internal static class RelayHttpApi
 {
+	private const string PublicRoomRateLimitPolicy = "public-room";
+	private const int MaximumMetadataEntries = 16;
+	private const int MaximumMetadataKeyBytes = 64;
+	private const int MaximumMetadataValueBytes = 2048;
+	private const int MaximumMetadataTotalBytes = 8192;
+
+	private static readonly HashSet<string> PublicMetadataKeys = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"HostName",
+		"Version",
+		"Users",
+		"MaxMembers",
+		"DisconnectedFriends",
+	};
+
 	public static WebApplication Build(WebApplicationBuilder builder, RelayHostOptions relayHostOptions)
 	{
 		builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(relayHostOptions.HttpPort));
 
 		builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
+
+		builder.Services.AddRateLimiter(options =>
+		{
+			options.AddPolicy(PublicRoomRateLimitPolicy, context => RateLimitPartition.GetFixedWindowLimiter
+			(
+				context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+				_ => new FixedWindowRateLimiterOptions
+				{
+					PermitLimit = 60,
+					Window = TimeSpan.FromMinutes(1),
+					QueueLimit = 0,
+					AutoReplenishment = true,
+				}
+			));
+		});
 
 		builder.Services.AddCors(options =>
 		{
@@ -73,6 +105,8 @@ internal static class RelayHttpApi
 
 		app.UseCors();
 
+		app.UseRateLimiter();
+
 		app.MapGet("/health", () => Results.Ok());
 
 		app.MapPost("/rooms", (HttpContext context, CreateRoomRequest createRoomRequest) => CreateRoom(context, createRoomRequest, relayServer, relayHostOptions.HttpAdminTokenBytes));
@@ -80,6 +114,9 @@ internal static class RelayHttpApi
 		app.MapGet("/rooms", (HttpContext context) => GetRooms(context, relayServer, relayHostOptions.HttpAdminTokenBytes));
 
 		app.MapGet("/rooms/{roomCode}", (HttpContext context, string roomCode) => GetRoom(context, roomCode, relayServer, relayHostOptions.HttpAdminTokenBytes));
+
+		app.MapGet("/rooms/{roomCode}/public", (string roomCode) => GetPublicRoom(roomCode, relayServer))
+		   .RequireRateLimiting(PublicRoomRateLimitPolicy);
 
 		app.MapDelete("/rooms/{roomCode}", (HttpContext context, string roomCode) => DeleteRoom(context, roomCode, relayServer, relayHostOptions.HttpAdminTokenBytes));
 
@@ -120,6 +157,15 @@ internal static class RelayHttpApi
 		if (!IsAuthorised(context, adminTokenBytes)) return Results.Unauthorized();
 
 		RoomSnapshot? snapshot = relayServer.GetRoomSnapshot(roomCode);
+
+		return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+	}
+
+	private static IResult GetPublicRoom(string roomCode, Server relayServer)
+	{
+		if (!RoomCode.IsValid(roomCode)) return Results.NotFound();
+
+		PublicRoomSnapshot? snapshot = relayServer.GetPublicRoomSnapshot(roomCode);
 
 		return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
 	}
@@ -182,9 +228,55 @@ internal static class RelayHttpApi
 
 		if (request.DisplayName is not null && Encoding.UTF8.GetByteCount(request.DisplayName) > 255) return Results.BadRequest($"{nameof(PatchRoomRequest.DisplayName)} must be at most 255 bytes when UTF-8 encoded.");
 
-		RoomSnapshot? snapshot = relayServer.PatchRoom(roomCode, request.DisplayName, request.MetadataToAdd, request.MetadataToRemove);
+		string? metadataValidationError = ValidatePublicMetadata(request.MetadataToAdd, request.MetadataToRemove);
+
+		if (metadataValidationError is not null) return Results.BadRequest(metadataValidationError);
+
+		RoomSnapshot? snapshot = relayServer.PatchRoom(roomCode, request.DisplayName, request.IsPublic, request.MetadataToAdd, request.MetadataToRemove);
 
 		return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+	}
+
+	private static string? ValidatePublicMetadata(IReadOnlyDictionary<string, string>? metadataToAdd, IReadOnlyList<string>? metadataToRemove)
+	{
+		if (metadataToAdd is { Count: > MaximumMetadataEntries }) return $"At most {MaximumMetadataEntries} metadata entries may be added per request.";
+
+		if (metadataToRemove is { Count: > MaximumMetadataEntries }) return $"At most {MaximumMetadataEntries} metadata entries may be removed per request.";
+
+		int totalBytes = 0;
+
+		if (metadataToAdd is not null)
+		{
+			foreach ((string key, string value) in metadataToAdd)
+			{
+				if (string.IsNullOrWhiteSpace(key) || !PublicMetadataKeys.Contains(key)) return $"Metadata key '{key}' is not allowed.";
+
+				int keyBytes = Encoding.UTF8.GetByteCount(key);
+				int valueBytes = Encoding.UTF8.GetByteCount(value ?? string.Empty);
+
+				if (keyBytes > MaximumMetadataKeyBytes) return $"Metadata keys must be at most {MaximumMetadataKeyBytes} bytes when UTF-8 encoded.";
+
+				if (valueBytes > MaximumMetadataValueBytes) return $"Metadata values must be at most {MaximumMetadataValueBytes} bytes when UTF-8 encoded.";
+
+				totalBytes += keyBytes + valueBytes;
+			}
+		}
+
+		if (totalBytes > MaximumMetadataTotalBytes) return $"Metadata must be at most {MaximumMetadataTotalBytes} bytes when UTF-8 encoded.";
+
+		if (metadataToRemove is not null)
+		{
+			foreach (string key in metadataToRemove)
+			{
+				if (string.IsNullOrWhiteSpace(key) || !PublicMetadataKeys.Contains(key)) return $"Metadata key '{key}' is not allowed.";
+			}
+		}
+
+		if (metadataToAdd is not null && metadataToAdd.TryGetValue("Users", out string? users) && !int.TryParse(users, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) return "Users must be an integer.";
+
+		if (metadataToAdd is not null && metadataToAdd.TryGetValue("MaxMembers", out string? maxMembers) && !int.TryParse(maxMembers, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) return "MaxMembers must be an integer.";
+
+		return null;
 	}
 
 	private static IResult KickClient(HttpContext context, string roomCode, int virtualClientId, Server relayServer, byte[] adminTokenBytes)
@@ -207,6 +299,7 @@ internal static class RelayHttpApi
 	public sealed record PatchRoomRequest
 	(
 		string? DisplayName = null,
+		bool? IsPublic = null,
 		Dictionary<string, string>? MetadataToAdd = null,
 		List<string>? MetadataToRemove = null
 	);

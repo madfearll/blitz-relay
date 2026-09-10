@@ -179,6 +179,14 @@ internal sealed class Server : IDisposable
 		}
 	}
 
+	public PublicRoomSnapshot? GetPublicRoomSnapshot(string roomCode)
+	{
+		lock (_mutex)
+		{
+			return _roomsByCode.TryGetValue(roomCode, out Room? room) && room.IsPublic ? PublicRoomSnapshot.FromRoom(room) : null;
+		}
+	}
+
 	public bool DeleteRoom(string roomCode)
 	{
 		lock (_mutex)
@@ -199,13 +207,15 @@ internal sealed class Server : IDisposable
 		}
 	}
 
-	public RoomSnapshot? PatchRoom(string roomCode, string? displayName, IReadOnlyDictionary<string, string>? metadataToAdd, IReadOnlyList<string>? metadataToRemove)
+	public RoomSnapshot? PatchRoom(string roomCode, string? displayName, bool? isPublic, IReadOnlyDictionary<string, string>? metadataToAdd, IReadOnlyList<string>? metadataToRemove)
 	{
 		lock (_mutex)
 		{
 			if (!_roomsByCode.TryGetValue(roomCode, out Room? room)) return null;
 
 			if (displayName is not null) room.DisplayName = displayName;
+
+			if (isPublic is not null) room.IsPublic = isPublic.Value;
 
 			if (metadataToRemove is not null)
 			{

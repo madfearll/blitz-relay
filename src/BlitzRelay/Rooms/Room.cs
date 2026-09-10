@@ -8,7 +8,7 @@ internal sealed class Room
 
 	public required RoomKind Kind { get; init; }
 
-	public bool IsPublic { get; init; }
+	public bool IsPublic { get; set; }
 
 	public string DisplayName { get; set; } = string.Empty;
 
