@@ -30,7 +30,7 @@
 
     <PropertyGroup Condition="'$(Flavour)' == 'standalone'">
         <PublishAot>false</PublishAot>
-        <PublishTrimmed>true</PublishTrimmed>
+        <PublishTrimmed>false</PublishTrimmed>
         <SelfContained>true</SelfContained>
     </PropertyGroup>
 
