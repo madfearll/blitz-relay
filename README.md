@@ -5,7 +5,7 @@ relay between game clients, supporting both reliable and unreliable delivery mod
 
 ## Features
 
-- **Room-Based Relay**: Clients connect to a relay server and are assigned to rooms identified by 8-character codes.
+- **Room-Based Relay**: Clients connect to a relay server and are assigned to rooms identified by 5-character codes.
 - **Two Room Types**:
     - *Ephemeral*: Created by a host client and destroyed when the host disconnects.
     - *Persistent Reserved*: Created via the HTTP API, survive host disconnection, and support automatic host promotion
@@ -30,6 +30,10 @@ The server consists of two main components:
 - Other clients join using the room code and receive a virtual client ID.
 - The host sends data to specific clients or broadcasts to all.
 - When the host of a persistent room disconnects, the server promotes the next client in join order to host.
+
+Room codes use `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` and are case-insensitive. They locate rooms, not authenticate
+players. Setting `IsPublic` to `false` hides anonymous metadata lookup but does not prevent UDP joins by room code.
+Active codes are checked for collisions before assignment; deleted room codes can be reused.
 
 ## Installation
 

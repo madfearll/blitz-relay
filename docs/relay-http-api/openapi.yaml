@@ -83,7 +83,7 @@ paths:
         required: true
         schema:
           type: string
-        description: The 8-character room code
+        description: The 5-character room code (case-insensitive)
 
     get:
       summary: Get room details
@@ -149,7 +149,7 @@ paths:
         required: true
         schema:
           type: string
-        description: The 8-character room code
+        description: The 5-character room code (case-insensitive)
       - name: virtualClientId
         in: path
         required: true
@@ -177,14 +177,16 @@ paths:
         required: true
         schema:
           type: string
-          pattern: '^[A-HJ-NP-Z2-9]{8}$'
-        description: The exact 8-character room code
+          pattern: '^[A-HJ-NP-Za-hj-np-z2-9]{5}$'
+        description: The exact 5-character room code (case-insensitive)
     get:
       summary: Query published room metadata
       description: |
         Returns the public snapshot for an exact room code without authentication.
         Missing, unpublished, private, and destroyed rooms all return 404. Requests
         are limited to 60 per minute per source IP.
+        Room codes are locators, not credentials. Unpublishing a room does not
+        prevent direct UDP joins by room code.
       security: [ ]
       responses:
         '200':

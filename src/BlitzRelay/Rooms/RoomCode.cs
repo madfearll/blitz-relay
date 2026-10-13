@@ -6,7 +6,7 @@ public static class RoomCode
 {
 	private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-	private const int CodeLength = 8;
+	private const int CodeLength = 5;
 
 	public static bool IsValid(string? code)
 	{
